@@ -1,9 +1,14 @@
+#!/usr/bin/env python
+# coding: utf-8
+
 import time
 import logging
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from bs4 import BeautifulSoup
+from datetime import datetime
+import re
 
 logging.basicConfig(level=logging.INFO)
 
@@ -19,19 +24,17 @@ def parse_authors_and_year(authors_and_year_text):
     if not authors_and_year_text:
         return "", ""
 
+    # Recherche d'une année plausible (entre 1800 et l'année actuelle)
+    current_year = datetime.now().year
+    year_match = re.search(r'\b(18[0-9]{2}|19[0-9]{2}|20[0-9]{2}|21[0-9]{2})\b', authors_and_year_text)
+    year = year_match.group(0) if year_match and int(year_match.group(0)) <= current_year else ""
+
     parts = authors_and_year_text.split('-')
     authors = parts[0].strip() if len(parts) > 0 else ""
-    year = ""
-
-    # Rechercher une année valide dans le texte
-    for part in reversed(parts):
-        if part.strip()[-4:].isdigit():
-            year = part.strip()[-4:]
-            break
 
     return authors, year
 
-def search_citations(driver, cited_by_url, start_year, end_year, max_pages=1):
+def search_citations(driver, cited_by_url, start_year, end_year, max_pages=100):
     url = f"{cited_by_url}&as_ylo={start_year}&as_yhi={end_year}"
     logging.info(f"URL utilisée : {url}")
     driver.get(url)
@@ -54,6 +57,11 @@ def search_citations(driver, cited_by_url, start_year, end_year, max_pages=1):
 
                 logging.info(f"Texte des auteurs et année extrait : {authors_and_year_text}")
                 authors, year = parse_authors_and_year(authors_and_year_text)
+
+                # Valider que l'année est dans la plage
+                if year and (int(year) < start_year or int(year) > end_year):
+                    logging.warning(f"Année hors plage détectée : {year}")
+                    year = ""
 
                 results.append({
                     "Titre de l'article ou du document": title,
@@ -93,13 +101,13 @@ year_ranges = [
 all_results = []
 for start_year, end_year in year_ranges:
     print(f"Scraping citations pour {start_year}-{end_year}")
-    results = search_citations(driver, cited_by_url, start_year, end_year, max_pages=1)
+    results = search_citations(driver, cited_by_url, start_year, end_year, max_pages=100)
     all_results.extend(results)
 
 if all_results:
     df = pd.DataFrame(all_results)
 
-    # Exporter les résultats sans ajouter une colonne supplémentaire
+    # Exporter les résultats
     output_file = "distant_reading_citations.csv"
     df.to_csv(output_file, index=False)
     print(f"Résultats exportés vers {output_file}")
