@@ -1,0 +1,108 @@
+import time
+import logging
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from bs4 import BeautifulSoup
+
+logging.basicConfig(level=logging.INFO)
+
+def init_driver():
+    options = webdriver.ChromeOptions()
+    driver = webdriver.Chrome(options=options)
+    return driver
+
+def parse_authors_and_year(authors_and_year_text):
+    """
+    Parse the authors and year from the authors and year text.
+    """
+    if not authors_and_year_text:
+        return "", ""
+
+    parts = authors_and_year_text.split('-')
+    authors = parts[0].strip() if len(parts) > 0 else ""
+    year = ""
+
+    # Rechercher une année valide dans le texte
+    for part in reversed(parts):
+        if part.strip()[-4:].isdigit():
+            year = part.strip()[-4:]
+            break
+
+    return authors, year
+
+def search_citations(driver, cited_by_url, start_year, end_year, max_pages=1):
+    url = f"{cited_by_url}&as_ylo={start_year}&as_yhi={end_year}"
+    logging.info(f"URL utilisée : {url}")
+    driver.get(url)
+    print("Si un CAPTCHA apparaît, résolvez-le dans le navigateur.")
+    input("Appuyez sur Entrée une fois le CAPTCHA résolu...")
+
+    results = []
+    for page in range(max_pages):
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        articles = soup.find_all('div', class_='gs_ri')
+
+        logging.info(f"Nombre de résultats trouvés sur cette page : {len(articles)}")
+
+        for article in articles:
+            try:
+                title = article.find('h3', class_='gs_rt').text if article.find('h3', class_='gs_rt') else ''
+                link = article.find('h3', class_='gs_rt').a['href'] if article.find('h3', class_='gs_rt') and article.find('h3', class_='gs_rt').a else ''
+                authors_and_year_text = article.find('div', class_='gs_a').text if article.find('div', class_='gs_a') else ''
+                journal_or_conference = authors_and_year_text.split('-')[1].strip() if '-' in authors_and_year_text else ''
+
+                logging.info(f"Texte des auteurs et année extrait : {authors_and_year_text}")
+                authors, year = parse_authors_and_year(authors_and_year_text)
+
+                results.append({
+                    "Titre de l'article ou du document": title,
+                    "Lien vers le document": link,
+                    "Auteurs": authors,
+                    "Journal ou conférence": journal_or_conference,
+                    "Année de publication": year
+                })
+            except Exception as e:
+                logging.warning(f"Erreur lors de l'extraction d'un résultat: {e}")
+
+        try:
+            # Modification pour prendre en compte le bouton "Suivant"
+            next_button = driver.find_element(By.LINK_TEXT, 'Suivant')
+            if next_button.is_displayed() and next_button.is_enabled():
+                next_button.click()
+                logging.info(f"Passage à la page suivante...")
+                time.sleep(3)  # Pause pour laisser la page suivante charger
+            else:
+                logging.info("Bouton 'Suivant' non cliquable. Fin de la pagination.")
+                break
+        except Exception as e:
+            logging.info("Aucune page suivante trouvée. Arrêt.")
+            break
+
+    return results
+
+# URL du lien "Cited by" pour le livre de Moretti
+cited_by_url = "https://scholar.google.ch/scholar?cites=4367469684120605481&as_sdt=2005&sciodt=0,5&hl=fr"
+driver = init_driver()
+
+# Configuration des plages d'années
+year_ranges = [
+    (2014, 2017),
+]
+
+all_results = []
+for start_year, end_year in year_ranges:
+    print(f"Scraping citations pour {start_year}-{end_year}")
+    results = search_citations(driver, cited_by_url, start_year, end_year, max_pages=1)
+    all_results.extend(results)
+
+if all_results:
+    df = pd.DataFrame(all_results)
+
+    # Exporter les résultats sans ajouter une colonne supplémentaire
+    output_file = "distant_reading_citations.csv"
+    df.to_csv(output_file, index=False)
+    print(f"Résultats exportés vers {output_file}")
+else:
+    print("Aucun résultat trouvé.")
+driver.quit()
