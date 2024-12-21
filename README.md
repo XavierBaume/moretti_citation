@@ -4,6 +4,7 @@
 (1) Extraction
 (2) Concaténation et suppression des doublons
 (3) Création de graphe temporel
+(4) Visualisation des publications citant l'ouvrage de Moretti
 
 ## Remarques
 
